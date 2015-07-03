@@ -22,10 +22,10 @@ CP437_OVERRIDES = {
 }
 
 # Unicode categories to filter out
-FILTER_CATEGORIES = ('Cc', 'Zs')
+FILTER_CATEGORIES = ('Cc')
 
 # Pixels per em scale, since apparently 8 is too small
-SCALE = 2
+SCALE = 64
 
 
 class Charset:
