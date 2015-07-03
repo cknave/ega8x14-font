@@ -1,3 +1,12 @@
+"""
+makefont tests
+
+nosetests -d --with-coverage --cover-package=makefont
+"""
+
+from io import StringIO
+from lxml import etree
+
 from nose import with_setup
 
 import makefont
@@ -84,3 +93,21 @@ def test_character_view():
 def test_rectangles():
     rects = makefont.rectangles(charset[1])
     assert rects == RECTANGLES_01
+
+
+@with_setup(load_charset)
+def test_charset_sequence():
+    assert len(charset) == 256
+    charset[255]
+
+
+@with_setup(load_charset)
+def test_valid_svg():
+    with open('SVG.xsd') as xsd:
+        schema = etree.XMLSchema(file=xsd)
+
+    rectangles_list = [makefont.rectangles(c) for c in charset]
+    svg = makefont.make_svg(charset, rectangles_list, 'cp437', 'EGA 8x14')
+
+    doc = etree.parse(StringIO(svg))
+    schema.assertValid(doc)
