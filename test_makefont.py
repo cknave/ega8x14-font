@@ -28,37 +28,37 @@ CHAR_01 = [
     "        "
 ]
 
-LINE = lambda x1, x2, y: makefont.Rectangle(x1, y, x2, y+1)
-DOT = lambda x, y: makefont.Rectangle(x, y, x+1, y+1)
+LINE = lambda x1, x2, y: makefont.Rectangle(x1, y, x2, y-1)
+DOT = lambda x, y: makefont.Rectangle(x, y, x+1, y-1)
 RECTANGLES_01 = [
-    LINE(1, 7, 2),
+    LINE(1, 7, 12),
 
-    DOT(0, 3),
-    DOT(7, 3),
+    DOT(0, 11),
+    DOT(7, 11),
 
-    DOT(0, 4),
-    DOT(2, 4),
-    DOT(5, 4),
-    DOT(7, 4),
+    DOT(0, 10),
+    DOT(2, 10),
+    DOT(5, 10),
+    DOT(7, 10),
 
-    DOT(0, 5),
-    DOT(7, 5),
+    DOT(0, 9),
+    DOT(7, 9),
 
-    DOT(0, 6),
-    DOT(7, 6),
+    DOT(0, 8),
+    DOT(7, 8),
 
     DOT(0, 7),
     LINE(2, 6, 7),
     DOT(7, 7),
 
-    DOT(0, 8),
-    LINE(3, 5, 8),
-    DOT(7, 8),
+    DOT(0, 6),
+    LINE(3, 5, 6),
+    DOT(7, 6),
 
-    DOT(0, 9),
-    DOT(7, 9),
+    DOT(0, 5),
+    DOT(7, 5),
 
-    LINE(1, 7, 10)
+    LINE(1, 7, 4)
 ]
 
 charset = None

@@ -24,6 +24,9 @@ CP437_OVERRIDES = {
 # Unicode categories to filter out
 FILTER_CATEGORIES = ('Cc', 'Zs')
 
+# Pixels per em scale, since apparently 8 is too small
+SCALE = 2
+
 
 class Charset:
     def __init__(self, data, character_height=14):
@@ -70,7 +73,7 @@ def rectangles(character):
                 rect_start = x
             if not pixel and rect_start is not None:
                 # Invert the y-axis because SVG
-                yi = character.height - y
+                yi = (character.height - y)
                 rectangles.append(Rectangle(rect_start, yi, x, yi-1))
                 rect_start = None
     return rectangles
@@ -84,19 +87,21 @@ def unicode_characters(codepage, total_characters=256):
     return characters
 
 
-def rectangle_path(r):
-    return 'M {x1},{y1} H {x2} V {y2} H {x1} Z'.format(**vars(r))
+def rectangle_path(r, scale=SCALE):
+    coords = {dimen: getattr(r, dimen)*scale for dimen in ('x1', 'y1', 'x2', 'y2')}
+    return 'M {x1},{y1} H {x2} V {y2} H {x1} Z'.format(**coords)
 
 
 def make_svg(charset, rectangles_list, codepage, font_name):
     assert len(charset) == len(rectangles_list)
+    width = WIDTH * SCALE
+    height = charset.character_height * SCALE
     svg = ['<svg xmlns="http://www.w3.org/2000/svg" version="1.1">'
            '<defs>'
            '<font horiz-adv-x="{width}">'
            '<font-face font-family="{font_name}" units-per-em="{width}"'
-           '  cap-height="{charset.character_height}"'
-           '  x-height="{charset.character_height}"/>'
-           '<missing-glyph d=""/>\n'.format(width=WIDTH, charset=charset, font_name=font_name)]
+           ' cap-height="{height}" x-height="{height}" bbox="0 0 {width} {height}"/>'
+           '<missing-glyph d=""/>\n'.format(**locals())]
 
     unicode_list = unicode_characters(codepage, len(charset))
     printable_enumerated = [(i, c) for i, c in enumerate(unicode_list)
