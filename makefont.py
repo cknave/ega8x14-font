@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+"""Build the EGA 8x14 font."""
 
-from collections import namedtuple
 import unicodedata
 from xml.sax.saxutils import quoteattr
+
+from shapely.affinity import scale
+from shapely.geometry import box, Polygon, MultiPolygon
 
 # Assume all characters are 8px wide
 WIDTH = 8
@@ -29,57 +32,192 @@ SCALE = 64
 
 
 class Charset:
+    """Pixel data for a character set."""
     def __init__(self, data, character_height=14):
+        """Initialize a Charset.
+
+        :param bytes data: binary charset, one row per byte
+        :param int character_height: number of rows per character
+        """
         assert character_height > 0
         assert len(data) % character_height == 0
         self.data = data
         self.character_height = character_height
 
     def __len__(self):
+        """Return the number of characters in the Charset."""
         return len(self.data) // self.character_height
 
     def __getitem__(self, character):
+        """Get a single Character.
+
+        :param int character: character index
+        :returns: the Character
+        :rtype: Character
+        """
         if character < 0 or character >= len(self):
             raise IndexError
         return Character(self, character)
 
     def pixel(self, character, x, y):
+        """Get a pixel value.
+
+        :param int character: character index
+        :param int x: x-coordinate
+        :param int y: y-coordinate
+        :returns: 0 for off, 1 for on
+        :rtype: int
+        """
         assert 0 <= x <= LAST_X
         byte = self.data[character * self.character_height + y]
         return (byte >> (LAST_X - x)) & 1
 
 
 class Character:
+    """Pixel data for a character."""
     def __init__(self, charset, character):
+        """Initialize a Character view into a Charset.
+
+        :param Charset charset: the Charset
+        :param int character: index into charset
+        """
         self.charset = charset
         self.character = character
 
-    width = property(lambda _: WIDTH)
-    height = property(lambda self: self.charset.character_height)
+    width = property(lambda _: WIDTH, doc="width of the character")
+    height = property(lambda self: self.charset.character_height, doc="height of the character")
 
-    pixel = lambda self, x, y: self.charset.pixel(self.character, x, y)
+    def pixel(self, x, y):
+        """Get a pixel value.
+
+        :param int x: x-coordinate
+        :param int y: y-coordinate
+        :returns: 0 for off, 1 for on
+        :rtype: int
+        """
+        return self.charset.pixel(self.character, x, y)
 
 
-Rectangle = namedtuple('Rectangle', 'x1 y1 x2 y2')
+class CharacterOutline:
+    """Outline paths for a character."""
+    def __init__(self, character):
+        """Initialize a CharacterOutline.
 
+        :param Character character: character to use
+        """
+        boxes = self._scan_boxes(character)
+        union = self._union_boxes(boxes, Polygon())
+        self.geometry = self._simplify(union)
 
-def rectangles(character):
-    rectangles = []
-    for y in range(character.height):
-        row = [character.pixel(x, y) for x in range(0, character.width)]
-        rect_start = None
-        for x, pixel in enumerate(row + [0]):
-            if pixel and rect_start is None:
-                rect_start = x
-            if not pixel and rect_start is not None:
-                # Invert the y-axis because SVG
-                yi = (character.height - y)
-                rectangles.append(Rectangle(rect_start, yi, x, yi-1))
-                rect_start = None
-    return rectangles
+    def svg_path(self):
+        """Return the SVG path string for this outline."""
+        if isinstance(self.geometry, Polygon):
+            return self._svg_path_polygon(self.geometry)
+        else:
+            return ' '.join(self._svg_path_polygon(p) for p in self.geometry.geoms)
+
+    @classmethod
+    def _scan_boxes(cls, character):
+        """Return a list of boxes from scanning the character left to right, top to bottom."""
+        boxes = []
+        for y in range(character.height):
+            row = [character.pixel(x, y) for x in range(0, character.width)]
+            box_start = None
+            for x, pixel in enumerate(row + [0]):
+                if pixel and box_start is None:
+                    box_start = x
+                if not pixel and box_start is not None:
+                    boxes.append(box(box_start, y, x, y+1))
+                    box_start = None
+        return boxes
+
+    @classmethod
+    def _union_boxes(cls, boxes, geometry):
+        """Return a Polygon or MultiPolygon for all the boxes in the list.
+
+        This method attempts to union all polygons first.  If that would cause a hole, the
+        polygons will be combined into a MultiPolygon instead.
+
+        :param list boxes: list of box polygons
+        :param geometry: existing Polygon or MultiPolygon to combine with
+        :return: a single Polygon or MultiPolygon containing all the boxes
+        """
+        if not boxes:
+            return geometry
+        union = geometry.union(boxes[0])
+        if not cls._has_holes(union):
+            return cls._union_boxes(boxes[1:], union)
+        else:
+            # Can't union these since it makes a hole
+            combined = cls._combine(geometry, boxes[0])
+            return cls._union_boxes(boxes[1:], combined)
+
+    @classmethod
+    def _has_holes(cls, geometry):
+        """Check if a Polygon or MultiPolygon has any holes."""
+        if isinstance(geometry, Polygon):
+            return bool(geometry.interiors)
+        for polygon in geometry:
+            if polygon.interiors:
+                return True
+        return False
+
+    @classmethod
+    def _combine(cls, polygon1, polygon2):
+        """Combine two Polygons or MultiPolygons into a single MultiPolygon."""
+        polygons = []
+        for p in polygon1, polygon2:
+            if isinstance(p, MultiPolygon):
+                polygons.append(p.geoms)
+            else:
+                polygons.append(p)
+        return MultiPolygon(polygons)
+
+    @classmethod
+    def _simplify(cls, geometry):
+        """Simplify the geometry of a Polygon or MultiPolygons.
+
+        This is done by replacing all geometries with their convex hull, which will have the
+        minimum vertices required.  (We can do this because no geometries are allowed to have
+        holes.
+        """
+        # Nope, can't use convex hull.  These shapes aren't convex just because they don't have
+        # holes.
+        return geometry
+        # if geometry.is_empty:
+        #     return geometry
+        # if isinstance(geometry, Polygon):
+        #     return geometry.boundary.convex_hull
+        # if not isinstance(geometry, MultiPolygon):
+        #     raise ValueError('Expected Polygon or MultiPolygon')
+        # polygons = [cls._simplify(p) for p in geometry.geoms]
+        # return MultiPolygon(polygons)
+
+    @classmethod
+    def _svg_path_polygon(cls, polygon):
+        """Return the SVG path (M...Z) for a single polygon.
+
+        All scaling for SVG is applied at this point.
+
+        """
+        if polygon.is_empty:
+            return ""
+        assert polygon.boundary.coords[0] == polygon.boundary.coords[-1]
+        # Flip the y-axis because SVG.
+        scaled = scale(polygon, SCALE, -SCALE)
+        coords = ' '.join('{},{}'.format(int(x), int(y))
+                          for x, y in scaled.boundary.coords)
+        return 'M {} Z'.format(coords)
 
 
 def unicode_characters(codepage, total_characters=256):
+    """Return a list of the unicode characters for an encoding.
+
+    :param str codepage: encoding name
+    :param int total_characters: number of characters to return
+    :returns: list of characters
+    :rtype: list
+    """
     characters = [bytes([i]).decode(codepage) for i in range(total_characters)]
     if codepage == 'cp437':
         for index, override in CP437_OVERRIDES.items():
@@ -87,32 +225,28 @@ def unicode_characters(codepage, total_characters=256):
     return characters
 
 
-def rectangle_path(r, scale=SCALE):
-    coords = {dimen: getattr(r, dimen)*scale for dimen in ('x1', 'y1', 'x2', 'y2')}
-    return 'M {x1},{y1} H {x2} V {y2} H {x1} Z'.format(**coords)
-
-
-def make_svg(charset, rectangles_list, codepage, font_name):
-    assert len(charset) == len(rectangles_list)
+def make_svg(charset, outline_list, codepage, font_name):
+    assert len(charset) == len(outline_list)
     width = WIDTH * SCALE
     height = charset.character_height * SCALE
-    svg = ['<svg xmlns="http://www.w3.org/2000/svg" version="1.1">'
-           '<defs>'
-           '<font horiz-adv-x="{width}">'
-           '<font-face font-family="{font_name}" units-per-em="{width}"'
-           ' cap-height="{height}" x-height="{height}" bbox="0 0 {width} {height}"/>'
-           '<missing-glyph d=""/>\n'.format(**locals())]
+    svg = ['<svg xmlns="http://www.w3.org/2000/svg" version="1.1">\n'
+           '  <defs>\n'
+           '    <font horiz-adv-x="{width}">\n'
+           '      <font-face font-family="{font_name}" units-per-em="{width}"\n'
+           '          cap-height="{height}" x-height="{height}" bbox="0 0 {width} {height}"/>\n'
+           '      <missing-glyph d=""/>\n'.format(**locals())]
 
     unicode_list = unicode_characters(codepage, len(charset))
-    printable_enumerated = [(i, c) for i, c in enumerate(unicode_list)
-                            if unicodedata.category(c) not in FILTER_CATEGORIES]
-    for i, char in printable_enumerated:
-        paths = ' '.join(rectangle_path(r) for r in rectangles_list[i])
-        quoted = quoteattr(char)
-        svg.append('<glyph unicode={} d="{}"/>\n'.format(quoted, paths))
+    filtered_enumerated = [(i, c) for i, c in enumerate(unicode_list)
+                           if unicodedata.category(c) not in FILTER_CATEGORIES]
+    for i, char in filtered_enumerated:
+        paths = outline_list[i].svg_path()
+        quoted_char = quoteattr(char)
+        svg.append('<glyph unicode={} d="{}"/>\n'.format(quoted_char, paths))
+        pass
 
-    svg.append('</font>'
-               '</defs>'
+    svg.append('    </font>\n'
+               '  </defs>\n'
                '</svg>\n')
 
     return ''.join(svg)
@@ -122,7 +256,7 @@ if __name__ == '__main__':
     with open('default.chr', 'rb') as inpu7:
         data = inpu7.read()
         charset = Charset(data)
-        rectangles_list = [rectangles(c) for c in charset]
-        svg = make_svg(charset, rectangles_list, 'cp437', 'EGA 8x14')
+        outline_list = [CharacterOutline(c) for c in charset]
+        svg = make_svg(charset, outline_list, 'cp437', 'EGA 8x14')
         with open('ega8x14.svg', 'wt') as output:
             output.write(svg)
