@@ -105,6 +105,7 @@ class CharacterOutline:
 
         :param Character character: character to use
         """
+        self.character = character
         boxes = self._scan_boxes(character)
         union = self._union_boxes(boxes, Polygon())
         self.geometry = self._simplify(union)
@@ -193,8 +194,7 @@ class CharacterOutline:
         # polygons = [cls._simplify(p) for p in geometry.geoms]
         # return MultiPolygon(polygons)
 
-    @classmethod
-    def _svg_path_polygon(cls, polygon):
+    def _svg_path_polygon(self, polygon):
         """Return the SVG path (M...Z) for a single polygon.
 
         All scaling for SVG is applied at this point.
@@ -204,7 +204,8 @@ class CharacterOutline:
             return ""
         assert polygon.boundary.coords[0] == polygon.boundary.coords[-1]
         # Flip the y-axis because SVG.
-        scaled = scale(polygon, SCALE, -SCALE)
+        origin = (0, self.character.height)
+        scaled = scale(polygon, SCALE, -SCALE, origin=origin)
         coords = ' '.join('{},{}'.format(int(x), int(y))
                           for x, y in scaled.boundary.coords)
         return 'M {} Z'.format(coords)
