@@ -145,13 +145,32 @@ class CharacterOutline:
         """
         if not boxes:
             return geometry
-        union = geometry.union(boxes[0])
-        if not cls._has_holes(union):
-            return cls._union_boxes(boxes[1:], union)
-        else:
-            # Can't union these since it makes a hole
-            combined = cls._combine(geometry, boxes[0])
-            return cls._union_boxes(boxes[1:], combined)
+        combined = cls._union_or_combine(boxes[0], geometry)
+        return cls._union_boxes(boxes[1:], combined)
+
+    @classmethod
+    def _union_or_combine(cls, polygon, geometry):
+        """Union or combine a Polygon into another Polygon or MultiPolygon.
+
+        Unions will be attempted for all the polygons in geometry, only adding a new polygon
+        if all attempts resulted in interior holes.
+        """
+        # Handle the simple polygon to polygon case.
+        if isinstance(geometry, Polygon):
+            union = geometry.union(polygon)
+            if not cls._has_holes(union):
+                return union
+            return MultiPolygon([geometry, polygon])
+        # Try to union with all the polygons in geometry first.
+        geoms = list(geometry.geoms)  # GeometrySequence doesn't behave enough like a list
+        for i, geom in enumerate(geoms):
+            if not geom.touches(polygon):
+                continue
+            union = geom.union(polygon)
+            if isinstance(union, Polygon) and not cls._has_holes(union):
+                return MultiPolygon(geoms[:i] + [union] + geoms[i+1:])
+        # No unions were possible!
+        return MultiPolygon(geoms + [polygon])
 
     @classmethod
     def _has_holes(cls, geometry):
@@ -162,17 +181,6 @@ class CharacterOutline:
             if polygon.interiors:
                 return True
         return False
-
-    @classmethod
-    def _combine(cls, polygon1, polygon2):
-        """Combine two Polygons or MultiPolygons into a single MultiPolygon."""
-        polygons = []
-        for p in polygon1, polygon2:
-            if isinstance(p, MultiPolygon):
-                polygons.extend(p.geoms)
-            else:
-                polygons.append(p)
-        return MultiPolygon(polygons)
 
     @classmethod
     def _simplify(cls, geometry):
