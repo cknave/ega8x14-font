@@ -169,7 +169,7 @@ class CharacterOutline:
         polygons = []
         for p in polygon1, polygon2:
             if isinstance(p, MultiPolygon):
-                polygons.append(p.geoms)
+                polygons.extend(p.geoms)
             else:
                 polygons.append(p)
         return MultiPolygon(polygons)

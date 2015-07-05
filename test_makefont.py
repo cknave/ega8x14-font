@@ -76,7 +76,8 @@ def test_character_view():
 
 @with_setup(load_charset)
 def test_rectangles():
-    outline = makefont.CharacterOutline(charset[1])
+    outline = makefont.CharacterOutline(charset[2])
+    #outline = makefont.CharacterOutline(charset[1])
     expected = MultiPolygon(BOXES_01)
     assert expected.equals(outline.geometry)
 
