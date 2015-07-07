@@ -110,6 +110,7 @@ class CharacterOutline:
 
         :param Character character: character to use
         """
+        print("Outlining character {}".format(character.character))
         self.character = character
         boxes = self._scan_boxes(character)
         union = self._union_boxes(boxes, Polygon())
@@ -225,8 +226,16 @@ class CharacterOutline:
                 if extensions:
                     new_overlapper = cascaded_union([overlapper] + extensions)
                     new_geoms = list(geometry.geoms)
-                    index = list(geometry.geoms).index(overlapper)
-                    new_geoms[index] = new_overlapper
+                    overlapper_index = new_geoms.index(overlapper)
+                    overlapped_index = new_geoms.index(overlapped)
+                    print((overlapped_index, overlapper_index))
+                    new_geoms[overlapper_index] = new_overlapper
+                    # Overlapper should be drawn over top of overlapped
+                    if overlapper_index < overlapped_index:
+                        print(new_geoms)
+                        new_geoms[overlapper_index] = overlapped
+                        new_geoms[overlapped_index] = new_overlapper
+                        print(new_geoms)
                     return cls._overlap_touching(MultiPolygon(new_geoms))
         # No overlaps left
         return geometry
