@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Build the EGA 8x14 font."""
 
+from itertools import combinations
 import unicodedata
 from xml.sax.saxutils import quoteattr
 
 from shapely.affinity import scale
-from shapely.geometry import box, Polygon, MultiPolygon
+from shapely.geometry import box, LineString, Polygon, MultiPolygon
+from shapely.ops import cascaded_union
 
 # Assume all characters are 8px wide
 WIDTH = 8
@@ -29,6 +31,9 @@ FILTER_CATEGORIES = ('Cc')
 
 # Pixels per em scale, since apparently 8 is too small
 SCALE = 64
+
+# Pixels to extend polygons into each other to prevent rendering gaps (pre-scaling)
+OVERLAP = 0.25
 
 
 class Charset:
@@ -108,7 +113,8 @@ class CharacterOutline:
         self.character = character
         boxes = self._scan_boxes(character)
         union = self._union_boxes(boxes, Polygon())
-        self.geometry = self._simplify(union)
+        overlapped = self._overlap_touching(union)
+        self.geometry = self._simplify(overlapped)
 
     def svg_path(self):
         """Return the SVG path string for this outline."""
@@ -123,13 +129,9 @@ class CharacterOutline:
         boxes = []
         for y in range(character.height):
             row = [character.pixel(x, y) for x in range(0, character.width)]
-            box_start = None
             for x, pixel in enumerate(row + [0]):
-                if pixel and box_start is None:
-                    box_start = x
-                if not pixel and box_start is not None:
-                    boxes.append(box(box_start, y, x, y+1))
-                    box_start = None
+                if pixel:
+                    boxes.append(box(x, y, x+1, y+1))
         return boxes
 
     @classmethod
@@ -143,10 +145,27 @@ class CharacterOutline:
         :param geometry: existing Polygon or MultiPolygon to combine with
         :return: a single Polygon or MultiPolygon containing all the boxes
         """
-        if not boxes:
-            return geometry
-        combined = cls._union_or_combine(boxes[0], geometry)
-        return cls._union_boxes(boxes[1:], combined)
+        combined = geometry
+        while boxes:
+            combined = cls._union_or_combine(boxes.pop(), combined)
+        # Try to further union all combinations of polygons
+        while isinstance(combined, MultiPolygon):
+            geoms = list(combined.geoms)
+            for poly1, poly2 in combinations(geoms, 2):
+                if not poly1.touches(poly2):
+                    continue
+                union = poly1.union(poly2)
+                if isinstance(union, Polygon) and not cls._has_holes(union):
+                    new_geoms = list(geoms)
+                    new_geoms.remove(poly1)
+                    new_geoms.remove(poly2)
+                    new_geoms.append(union)
+                    combined = MultiPolygon(new_geoms)
+                    break
+            if len(geoms) == len(combined.geoms):
+                # Tried all combinations, found no more unions
+                break
+        return combined
 
     @classmethod
     def _union_or_combine(cls, polygon, geometry):
@@ -181,6 +200,61 @@ class CharacterOutline:
             if polygon.interiors:
                 return True
         return False
+
+    @classmethod
+    def _overlap_touching(cls, geometry):
+        # Nothing to do for 0 or 1 polygons.
+        if geometry.is_empty or isinstance(geometry, Polygon):
+            return geometry
+        # Everywhere a polygon touches another polygon, we need to extend its touching
+        # segments inside the other.
+        extensions = []
+        for poly1, poly2 in combinations(geometry.geoms, 2):
+            if not poly1.touches(poly2):
+                continue
+            for overlapper, overlapped in ((poly1, poly2), (poly2, poly1)):
+                # Find all line segments in overlapper that touch overlapped.
+                for i in range(len(overlapper.boundary.coords) - 1):
+                    coords = overlapper.boundary.coords[i:i+2]
+                    if not LineString(coords).touches(overlapped):
+                        continue
+                    extension = cls._find_overlap_box(coords, overlapped)
+                    if extension:
+                        extensions.append(extension)
+                # Add extensions on to the overlapper polygon.
+                if extensions:
+                    new_overlapper = cascaded_union([overlapper] + extensions)
+                    new_geoms = list(geometry.geoms)
+                    index = list(geometry.geoms).index(overlapper)
+                    new_geoms[index] = new_overlapper
+                    return cls._overlap_touching(MultiPolygon(new_geoms))
+        # No overlaps left
+        return geometry
+
+    @classmethod
+    def _find_overlap_box(cls, coords, overlapped):
+        x1, x2 = coords[0][0], coords[1][0]
+        y1, y2 = coords[0][1], coords[1][1]
+        # Try to extrude a box from this segment into overlapped.
+        if x1 < x2:  # Horizontal, facing down
+            y2 += OVERLAP
+        elif x2 < x1:  # Horizontal, facing up
+            y1 -= OVERLAP
+        elif y1 < y2:  # Vertical, facing left
+            x1 -= OVERLAP
+        elif y2 < y1:  # Vertical, facing right
+            x2 += OVERLAP
+        else:  # Same point, should never happen
+            return None
+
+        # Box coords must be sorted
+        x1, x2 = sorted([x1, x2])
+        y1, y2 = sorted([y1, y2])
+        extruded = box(x1, y1, x2, y2)
+        if overlapped.contains(extruded):
+            return extruded
+        else:
+            return None
 
     @classmethod
     def _simplify(cls, geometry):
