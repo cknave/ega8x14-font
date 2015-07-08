@@ -8,7 +8,7 @@ from io import StringIO
 from lxml import etree
 
 from nose import with_setup
-from shapely.geometry import box, MultiPolygon
+from shapely.geometry import box, Polygon, MultiPolygon
 
 import makefont
 
@@ -30,20 +30,21 @@ CHAR_01 = [
 ]
 
 HLINE = lambda x1, x2, y: box(x1, y, x2, y+1)
-VLINE = lambda x, y1, y2: box(x, y1, x, y2)
-DOT = lambda x, y: box(x, y, x+1, y-1)
+VLINE = lambda x, y1, y2: box(x, y1, x+1, y2)
+DOT = lambda x, y: box(x, y, x+1, y+1)
 
 BOXES_01 = [
     HLINE(1, 7, 2),
-    VLINE(0, 3, 9),
-    VLINE(7, 3, 9),
+
+    DOT(2, 4),
+    DOT(5, 4),
+
+    VLINE(0, 3, 10),
+    VLINE(7, 3, 10),
     HLINE(1, 7, 10),
 
-    DOT(0, 3),
-    DOT(7, 3),
 
-    HLINE(2, 6, 7),
-    HLINE(3, 5, 8),
+    Polygon(((2, 7), (6, 7), (6, 8), (5, 8), (5, 9), (3, 9), (3, 8), (2, 8)))
 ]
 
 charset = None
@@ -75,11 +76,11 @@ def test_character_view():
 
 
 @with_setup(load_charset)
-def test_rectangles():
-    outline = makefont.CharacterOutline(charset[2])
-    #outline = makefont.CharacterOutline(charset[1])
+def test_outline():
+    outline = makefont.CharacterOutline(charset[1])
+    actual = outline.geometry
     expected = MultiPolygon(BOXES_01)
-    assert expected.equals(outline.geometry)
+    assert expected.equals(actual)
 
 
 @with_setup(load_charset)
@@ -88,13 +89,12 @@ def test_charset_sequence():
     charset[255]
 
 
-@with_setup(load_charset)
 def test_valid_svg():
     with open('SVG.xsd') as xsd:
         schema = etree.XMLSchema(file=xsd)
 
-    rectangles_list = [makefont.rectangles(c) for c in charset]
-    svg = makefont.make_svg(charset, rectangles_list, 'cp437', 'EGA 8x14')
+    with open('default.chr', 'rb') as chr_file:
+        svg = makefont.svg_for_chr(chr_file)
 
     doc = etree.parse(StringIO(svg))
     schema.assertValid(doc)

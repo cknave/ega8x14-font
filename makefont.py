@@ -4,7 +4,7 @@
 import unicodedata
 from xml.sax.saxutils import quoteattr
 
-from shapely.geometry import box, Polygon
+from shapely.geometry import box, Polygon, MultiPolygon
 from shapely.ops import cascaded_union
 
 # Assume all characters are 8px wide
@@ -142,23 +142,29 @@ class CharacterOutline:
 
     @classmethod
     def _simplify(cls, geometry):
-        """Simplify the geometry of a Polygon or MultiPolygons.
+        """Simplify the geometry of a Polygon or MultiPolygons."""
+        if geometry.is_empty:
+            return geometry
+        if isinstance(geometry, MultiPolygon):
+            return MultiPolygon([cls._simplify_polygon(p) for p in geometry.geoms])
+        else:
+            return cls._simplify_polygon(geometry)
 
-        This is done by replacing all geometries with their convex hull, which will have the
-        minimum vertices required.  (We can do this because no geometries are allowed to have
-        holes.
-        """
-        # Nope, can't use convex hull.  These shapes aren't convex just because they don't have
-        # holes.
-        return geometry
-        # if geometry.is_empty:
-        #     return geometry
-        # if isinstance(geometry, Polygon):
-        #     return geometry.boundary.convex_hull
-        # if not isinstance(geometry, MultiPolygon):
-        #     raise ValueError('Expected Polygon or MultiPolygon')
-        # polygons = [cls._simplify(p) for p in geometry.geoms]
-        # return MultiPolygon(polygons)
+    @classmethod
+    def _simplify_polygon(cls, polygon):
+        exterior = cls._simplify_linear_ring(polygon.exterior)
+        interiors = [cls._simplify_linear_ring(i) for i in polygon.interiors]
+        return Polygon(exterior, interiors)
+
+    @classmethod
+    def _simplify_linear_ring(cls, ring):
+        coords = list(ring.coords)
+        # Drop vertices that are on the same line as both their neighbors.
+        for i in range(len(coords)-2, 1, -1):
+            a, b, c = coords[i-1:i+2]
+            if a[0] == b[0] == c[0] or a[1] == a[1] == c[1]:
+                del coords[i]
+        return coords
 
     def _svg_path_polygon(self, polygon):
         """Return the SVG paths for a single polygon's exterior and interiors.
@@ -166,8 +172,6 @@ class CharacterOutline:
         All scaling for SVG is applied at this point.
 
         """
-        if polygon.is_empty:
-            return ''
         paths = []
         # Draw the exterior clockwise (our geometry is CCW)
         paths.append(self._svg_path_coords(list(polygon.exterior.coords)[::-1]))
@@ -236,11 +240,20 @@ def make_svg(charset, outline_list, codepage, font_name):
     return ''.join(svg)
 
 
+def svg_for_chr(file):
+    """Return SVG data for an input CHR file.
+
+    :param file: file-like object containing binary CHR data
+    :returns: SVG data
+    """
+    data = file.read()
+    charset = Charset(data)
+    outline_list = [CharacterOutline(c) for c in charset]
+    return make_svg(charset, outline_list, 'cp437', 'EGA 8x14')
+
+
 if __name__ == '__main__':
-    with open('default.chr', 'rb') as inpu7:
-        data = inpu7.read()
-        charset = Charset(data)
-        outline_list = [CharacterOutline(c) for c in charset]
-        svg = make_svg(charset, outline_list, 'cp437', 'EGA 8x14')
-        with open('ega8x14.svg', 'wt') as output:
-            output.write(svg)
+    with open('default.chr', 'rb') as chr_file:
+        svg = svg_for_chr(chr_file)
+        with open('ega8x14.svg', 'wt') as svg_file:
+            svg_file.write(svg)
