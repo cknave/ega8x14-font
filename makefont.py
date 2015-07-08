@@ -11,6 +11,11 @@ from shapely.ops import cascaded_union
 WIDTH = 8
 LAST_X = WIDTH-1
 
+# These metrics are correct for EGA 8x14
+CAPITAL_HEIGHT = 12
+LOWER_HEIGHT = 9
+BASELINE = 4
+
 # Special case: python doesn't decode CP437 visible control characters
 # From http://stackoverflow.com/a/14553297/180891
 CP437_OVERRIDES = {
@@ -108,7 +113,6 @@ class CharacterOutline:
 
         :param Character character: character to use
         """
-        print("Outlining character {}".format(character.character))
         self.character = character
         boxes = self._scan_boxes(character)
         union = cascaded_union(boxes)
@@ -205,11 +209,15 @@ def make_svg(charset, outline_list, codepage, font_name):
     assert len(charset) == len(outline_list)
     width = WIDTH * SCALE
     height = charset.character_height * SCALE
+    cap_height = CAPITAL_HEIGHT * SCALE
+    x_height = LOWER_HEIGHT * SCALE
+    baseline = BASELINE * SCALE
     svg = ['<svg xmlns="http://www.w3.org/2000/svg" version="1.1">\n'
            '  <defs>\n'
            '    <font horiz-adv-x="{width}">\n'
            '      <font-face font-family="{font_name}" units-per-em="{width}"\n'
-           '          cap-height="{height}" x-height="{height}" bbox="0 0 {width} {height}"/>\n'
+           '          cap-height="{cap_height}" x-height="{x_height}" alphabetic="{baseline}"\n'
+           '          bbox="0,0,{width},{height}" ascent="{height}" descent="0"/>\n'
            '      <missing-glyph d=""/>\n'.format(**locals())]
 
     unicode_list = unicode_characters(codepage, len(charset))
